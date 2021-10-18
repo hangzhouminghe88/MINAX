@@ -1,0 +1,33 @@
+#!/bin/sh
+
+MAKE=make
+QMAKE=@ANDROID_QT_QMAKE@
+APK_MAKE=@ANDROID_QT_APK_MAKE@
+
+TRAYMON_DIR=@TOP_DIR@/bacula/src/qt-console/tray-monitor
+BUILD_DIR=${TRAYMON_DIR}/android-build
+BUILD_TARGET=android-@ANDROID_API@
+BUILD_JSON_FILE=android-libbacula-tray-monitor.so-deployment-settings.json
+
+rm -rf ${BUILD_DIR}
+mkdir ${BUILD_DIR}
+
+${QMAKE} ${TRAYMON_DIR}/tray-monitor.android.pro -spec android-g++ CONFIG+=debug CONFIG+=force_debug_info CONFIG+=separate_debug_info
+
+#libfix.sh
+sed -i -e 's/\.so/\.la/g' Makefile
+
+${MAKE} clean 
+${MAKE} 
+${MAKE} install INSTALL_ROOT=${BUILD_DIR}
+
+#mvdyn.sh.in
+cp ${TRAYMON_DIR}/.libs/libbacula-tray-monitor.so ${TRAYMON_DIR}
+cp ${TRAYMON_DIR}/.libs/libbacula-tray-monitor.so ${BUILD_DIR}/@ANDROID_QT_BUILD_LIBS@
+cp @TOP_DIR@/bacula/src/lib/.libs/libbaccfg-@VERSION@.so ${BUILD_DIR}/@ANDROID_QT_BUILD_LIBS@
+cp @TOP_DIR@/bacula/src/lib/.libs/libbac-@VERSION@.so ${BUILD_DIR}/@ANDROID_QT_BUILD_LIBS@
+cp @TOP_DIR@/bacula/src/findlib/.libs/libbacfind-@VERSION@.so ${BUILD_DIR}/@ANDROID_QT_BUILD_LIBS@
+
+
+#build android apk
+${APK_MAKE} --output ${BUILD_DIR} --verbose --input ${BUILD_JSON_FILE} --android-platform ${BUILD_TARGET} --gradle

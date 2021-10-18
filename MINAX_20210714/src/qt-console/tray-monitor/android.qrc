@@ -1,0 +1,25 @@
+<RCC>
+    <qresource prefix="/">
+        <file>main.qml</file>
+        <file>TrayUiPage.qml</file>
+        <file>ResourceListPage.qml</file>
+        <file>ResourceListItem.qml</file>
+        <file>ResourceDetailsPage.qml</file>
+        <file>ResourceStatusPage.qml</file>
+        <file>JobListPage.qml</file>
+        <file>JobListItem.qml</file>
+        <file>RunJobPage.qml</file>
+        <file>RestoreJobPage.qml</file>
+        <file>JobSelectTab.qml</file>
+        <file>FileSelectTab.qml</file>
+        <file>RestoreConfirmTab.qml</file>
+        <file>FileDaemonConfigPage.qml</file>
+        <file>MainMenuPage.qml</file>
+        <file>FileDaemonPage.qml</file>
+        <file>ResourcePanel.qml</file>
+        <file>FeaturesTutorialPage.qml</file>
+        <file>ConfigTutorialPage.qml</file>
+        <file>TutorialPage.qml</file>
+        <file>PulseLoader.qml</file>
+    </qresource>
+</RCC>

@@ -1,0 +1,575 @@
+#!/bin/sh
+#
+# Copyright (C) 2000-2020 Kern Sibbald
+# License: BSD 2-Clause; see file LICENSE-FOSS
+#
+echo " "
+echo "This script will update a Bacula PostgreSQL database"
+echo " from any from version 12-16 or 1014-1021 to version 1022"
+echo " which is needed to convert from any Bacula Enterprise"
+echo " version 4.0.x, 6.x.y, 8.x.y, 10.x.y to version 12.4.x"
+echo " "
+
+
+bindir=@POSTGRESQL_BINDIR@
+PATH="$bindir:$PATH"
+db_name=@db_name@
+
+# Special trick to not do the upgrade from 1015 to 1016 with this script
+if [ "$1" = "--stop1015" ]; then
+    STOP1015=yes
+    shift			# remove this option from $*
+fi
+
+# Special trick to not do the upgrade from 1016 to 1017 with this script
+if [ "$1" = "--stop1016" ]; then
+    STOP1016=yes
+    shift			# remove this option from $*
+fi
+
+ARGS=$*
+
+getVersion()
+{
+    DBVERSION=`psql -d ${db_name} -t --pset format=unaligned -c "select VersionId from Version LIMIT 1" $ARGS`
+}
+
+getVersion
+
+if [ "x$DBVERSION" = x ]; then
+    echo " "
+    echo "Unable to detect database version, you can specify connection information"
+    echo "on the command line."
+    echo "Error. Cannot update this database."
+    echo " "
+    exit 1
+fi
+
+if [ "$DBVERSION" -lt 1014 -o "$DBVERSION" -gt 1021 ] ; then
+  if [ "$DBVERSION" -lt 12 -o "$DBVERSION" -gt 16 ] ; then
+    echo " "
+    echo "The existing database is version $DBVERSION !!"
+    echo "This script can only update an existing version 12-16, 1014-1021 database to version 1022."
+    echo "Error. Cannot update this database."
+    echo " "
+    exit 1
+  fi
+fi
+
+if [ "$DBVERSION" -eq 12 ] ; then
+    # from 5.0
+    if psql -f - -d ${db_name} $* <<END-OF-DATA
+BEGIN; -- Necessary for Bacula core
+CREATE TABLE RestoreObject (
+   RestoreObjectId SERIAL NOT NULL,
+   ObjectName TEXT NOT NULL,
+   RestoreObject BYTEA NOT NULL,
+   PluginName TEXT NOT NULL,
+   ObjectLength INTEGER DEFAULT 0,
+   ObjectFullLength INTEGER DEFAULT 0,
+   ObjectIndex INTEGER DEFAULT 0,
+   ObjectType INTEGER DEFAULT 0,
+   FileIndex INTEGER DEFAULT 0,
+   JobId INTEGER,
+   ObjectCompression INTEGER DEFAULT 0,
+   PRIMARY KEY(RestoreObjectId)
+   );
+
+CREATE INDEX restore_jobid_idx on RestoreObject(JobId);
+UPDATE Version SET VersionId=12;
+
+COMMIT;
+END-OF-DATA
+    then
+	echo "Update of Bacula PostgreSQL tables 12 to 13 succeeded."
+	getVersion
+    else
+	echo "Update of Bacula PostgreSQL tables 12 to 13 failed."
+	exit 1
+    fi
+fi
+
+if [ "$DBVERSION" -eq 13 ] ; then
+    # from 4.0
+    if psql -f - -d ${db_name} $* <<END-OF-DATA
+BEGIN; -- Necessary for Bacula core
+
+ALTER TABLE File ADD COLUMN DeltaSeq smallint default 0;
+
+UPDATE Version SET VersionId=14;
+COMMIT;
+
+-- ANALYSE;
+
+END-OF-DATA
+    then
+	echo "Update of Bacula PostgreSQL tables from 13 to 14 succeeded."
+	getVersion
+    else
+	echo "Update of Bacula PostgreSQL tables failed."
+	exit 1
+    fi
+fi
+
+
+if [ "$DBVERSION" -eq 14 ] ; then
+    # from 5.2
+    if psql -f - -d ${db_name} $* <<END-OF-DATA
+INSERT INTO Status (JobStatus,JobStatusLong,Severity) VALUES
+   ('I', 'Incomplete Job',25);
+UPDATE Version SET VersionId=1014;
+
+END-OF-DATA
+    then
+	echo "Update of Bacula PostgreSQL tables 14 to 1014 succeeded."
+	getVersion
+    else
+	echo "Update of Bacula PostgreSQL tables 14 to 1014 failed."
+	exit 1
+    fi
+fi
+
+if [ "$DBVERSION" -eq 1014 ] ; then
+    if psql -f - -d ${db_name} $* <<END-OF-DATA
+ALTER TABLE Media ADD COLUMN volabytes bigint default 0;
+ALTER TABLE Media ADD COLUMN volapadding bigint default 0;
+ALTER TABLE Media ADD COLUMN volholebytes bigint default 0;
+ALTER TABLE Media ADD COLUMN volholes integer default 0;
+UPDATE Version SET VersionId=1015;
+END-OF-DATA
+    then
+	echo "Update of Bacula PostgreSQL tables 1014 to 1015 succeeded."
+	getVersion
+    else
+	echo "Update of Bacula PostgreSQL tables 1014 to 1015 failed."
+	exit 1
+    fi
+fi
+
+# Upgrade from the community edition
+# 15 to 1017 migration
+if [ "$DBVERSION" -eq 15 -o "$DBVERSION" -eq 16 ]; then
+    # In version 16, the upgrade 1018-1019 is already done
+    if [ "$DBVERSION" -eq 16 ]; then
+        SKIP1018=1
+    fi
+
+    # Can be adjusted
+    WORKMEM=1GB
+
+    COMP=`which pigz`
+    if [ "$COMP" = "" ]; then
+	COMP=`which pbzip2`
+	if [ "$COMP" = "" ]; then
+	    COMP=`which lzop`
+	    if [ "$COMP" = "" ]; then
+		COMP=`which gzip`
+		if [ "$COMP" = "" ]; then
+		    echo "Error. Cannot find pigz, pbzip2, lzop or gzip"
+		    exit 1
+		fi
+	    fi
+	fi
+    fi
+
+    echo "Dumping File table to $PWD/file1017.data. "
+    echo ""
+    echo "The process may fail if the current user"
+    echo " doesn't have write permission on the current directory,"
+    echo " or if the system doesn't have enough space to store a"
+    echo " compressed export of the File table"
+    psql --set ON_ERROR_STOP=1 -d ${db_name} $* -c "set work_mem='$WORKMEM';"'set enable_mergejoin to off ; set enable_hashjoin to off; copy (SELECT FileId, FileIndex, JobId, PathId, Filename.Name, DeltaSeq, MarkId, LStat, Md5 FROM File JOIN Filename USING (FilenameId)) TO STDOUT' | $COMP -1 -c > file1017.data
+    
+    if [ $? -ne 0 ]; then
+	echo "Error while dumping file table to $PWD/file1017.data"
+	exit 1
+    fi
+
+    if ! psql --set ON_ERROR_STOP=1 -f - -d ${db_name} $* <<EOF
+BEGIN;
+
+DROP TABLE File;
+DROP TABLE Filename;
+
+CREATE TABLE File
+(
+    FileId	      bigint	  not null,
+    FileIndex	      integer	  not null  default 0,
+    JobId	      integer	  not null,
+    PathId	      integer	  not null,
+    Filename	      text	  not null  default '',
+    DeltaSeq	      smallint	  not null  default 0,
+    MarkId	      integer	  not null  default 0,
+    LStat	      text	  not null,
+    Md5 	      text	  not null
+);
+
+COMMIT;
+EOF
+    then 
+	echo "Creation of new File table failed."
+	exit 1
+    fi
+
+    echo "Loading the File table from $PWD/file.$$.data..."
+    # we do everything in the same commit to avoid creating WALs on this operation
+    cat file1017.data | $COMP -d | psql --set ON_ERROR_STOP=1 -d ${db_name} $* -c "BEGIN; TRUNCATE File; COPY File FROM STDIN; set maintenance_work_mem='2000MB'; CREATE INDEX file_jpfid_idx on File (JobId, PathId, Filename text_pattern_ops); ALTER TABLE ONLY File ADD CONSTRAINT file_pkey PRIMARY KEY (FileId); COMMIT;"
+    
+    if [ $? -ne 0 ]; then
+	echo "Inserting File data from file.$$.data failed."
+	exit 1
+    fi
+
+    echo "Creation of indexes and PK on the File table..."
+
+    # The maximum value for maintenance_work_mem is 2GB
+    if ! psql --set ON_ERROR_STOP=1 -f - -d ${db_name} $* <<EOF
+set maintenance_work_mem='2000MB';
+BEGIN;
+CREATE SEQUENCE file_fileid_seq;
+ALTER SEQUENCE file_fileid_seq OWNED BY File.fileid;
+SELECT pg_catalog.setval('file_fileid_seq', (SELECT MAX(FileId) FROM File), true);
+ALTER TABLE File ALTER COLUMN FileId SET DEFAULT nextval('file_fileid_seq'::regclass);
+
+ANALYZE File;
+
+ALTER TABLE Media ALTER VolWrites TYPE BIGINT;
+ALTER TABLE unsavedfiles DROP COLUMN filenameid;
+ALTER TABLE unsavedfiles ADD COLUMN filename text not null;
+
+UPDATE Version SET VersionId = 1017;
+
+COMMIT;
+EOF
+    then
+	echo "Index creation for Bacula PostgreSQL tables."
+	exit 1
+    fi
+    echo "Upgrade of the File table succeeded. Version 1017"
+    rm -f file1017.data
+    getVersion
+fi
+
+# Specific option to not do the 1015 to 1016 migration
+if [ "$STOP1015" = "" -a "$DBVERSION" -eq 1015 ]; then
+
+    # Can be adjusted
+    WORKMEM=1GB
+
+    COMP=`which pigz`
+    if [ "$COMP" = "" ]; then
+	COMP=`which pbzip2`
+	if [ "$COMP" = "" ]; then
+	    COMP=`which lzop`
+	    if [ "$COMP" = "" ]; then
+		COMP=`which gzip`
+		if [ "$COMP" = "" ]; then
+		    echo "Error. Cannot find pigz, pbzip2, lzop or gzip"
+		    exit 1
+		fi
+	    fi
+	fi
+    fi
+
+    echo "Dumping File table to $PWD/file1016.data. "
+    echo ""
+    echo "The process may fail if the current user"
+    echo " doesn't have write permission on the current directory,"
+    echo " or if the system doesn't have enough space to store a"
+    echo " compressed export of the File table"
+    psql --set ON_ERROR_STOP=1 -d ${db_name} $* -c "set work_mem='$WORKMEM';"'set enable_mergejoin to off ; set enable_hashjoin to off; copy (SELECT FileId, FileIndex, JobId, PathId, Filename.Name, DeltaSeq, MarkId, LStat, Md5 FROM File JOIN Filename USING (FilenameId)) TO STDOUT' | $COMP -1 -c > file1016.data
+    
+    if [ $? -ne 0 ]; then
+	echo "Error while dumping file table to $PWD/file1016.data"
+	exit 1
+    fi
+
+    if ! psql --set ON_ERROR_STOP=1 -f - -d ${db_name} $* <<EOF
+BEGIN;
+
+DROP TABLE File;
+DROP TABLE Filename;
+
+CREATE TABLE File
+(
+    FileId	      bigint	  not null,
+    FileIndex	      integer	  not null  default 0,
+    JobId	      integer	  not null,
+    PathId	      integer	  not null,
+    Filename	      text	  not null  default '',
+    DeltaSeq	      smallint	  not null  default 0,
+    MarkId	      integer	  not null  default 0,
+    LStat	      text	  not null,
+    Md5 	      text	  not null
+);
+
+COMMIT;
+EOF
+    then 
+	echo "Creation of new File table failed."
+	exit 1
+    fi
+
+    echo "Loading the File table from $PWD/file.$$.data..."
+    # we do everything in the same commit to avoid creating WALs on this operation
+    cat file1016.data | $COMP -d | psql --set ON_ERROR_STOP=1 -d ${db_name} $* -c "BEGIN; TRUNCATE File; COPY File FROM STDIN; set maintenance_work_mem='2000MB'; CREATE INDEX file_jpfid_idx on File (JobId, PathId, Filename text_pattern_ops); ALTER TABLE ONLY File ADD CONSTRAINT file_pkey PRIMARY KEY (FileId); COMMIT;"
+    
+    if [ $? -ne 0 ]; then
+	echo "Inserting File data from file.$$.data failed."
+	exit 1
+    fi
+
+    echo "Creation of indexes and PK on the File table..."
+
+    # The maximum value for maintenance_work_mem is 2GB
+    if ! psql --set ON_ERROR_STOP=1 -f - -d ${db_name} $* <<EOF
+set maintenance_work_mem='2000MB';
+BEGIN;
+CREATE SEQUENCE file_fileid_seq;
+ALTER SEQUENCE file_fileid_seq OWNED BY File.fileid;
+SELECT pg_catalog.setval('file_fileid_seq', (SELECT MAX(FileId) FROM File), true);
+ALTER TABLE File ALTER COLUMN FileId SET DEFAULT nextval('file_fileid_seq'::regclass);
+
+ANALYZE File;
+
+ALTER TABLE Media ALTER VolWrites TYPE BIGINT;
+ALTER TABLE Job ADD COLUMN FileTable text default 'File';
+ALTER TABLE JobHisto ADD COLUMN FileTable text default 'File';
+
+CREATE TABLE Snapshot (
+  SnapshotId	  serial,
+  Name		  text not null,
+  CreateTDate	  bigint default 0,
+  CreateDate	  timestamp without time zone not null,
+  ClientId	  int default 0,
+  Volume	  text not null,
+  Device	  text not null,
+  Type		  text not null,
+  Retention	  integer default 0,
+  Comment	  text,
+  primary key (SnapshotId)
+);
+
+CREATE UNIQUE INDEX snapshot_idx ON Snapshot (Device text_pattern_ops, 
+					      Volume text_pattern_ops, 
+					      Name text_pattern_ops);
+
+UPDATE Version SET VersionId = 1016;
+
+COMMIT;
+EOF
+    then
+	echo "Index creation for Bacula PostgreSQL tables."
+	exit 1
+    fi
+    echo "Upgrade of the File table succeeded."
+    rm -f file1016.data
+    getVersion
+fi
+
+if [ "$STOP1016" = "" -a "$DBVERSION" -eq 1016 ] ; then
+    if psql -f - -d ${db_name} $* <<END-OF-DATA
+begin;
+ALTER TABLE Snapshot ADD COLUMN JobId integer default 0;
+ALTER TABLE Snapshot ADD COLUMN FileSetId integer default 0;
+UPDATE Version SET VersionId=1017;
+commit;
+END-OF-DATA
+    then
+	echo "Update of Bacula PostgreSQL tables 1016 to 1017 succeeded."
+	getVersion
+    else
+	echo "Update of Bacula PostgreSQL tables 1016 to 1017 failed."
+	exit 1
+    fi
+fi
+
+if [ "$DBVERSION" -eq 1017 ] ; then
+    if psql -f - -d ${db_name} $* <<END-OF-DATA
+begin;
+CREATE TABLE FileMedia
+(
+    JobId	      integer	  not null,
+    FileIndex	      integer	  not null,
+    MediaId	      integer	  not null,
+    BlockAddress      bigint	  default 0,
+    RecordNo	      integer	  default 0,
+    FileOffset	      bigint	  default 0
+);
+
+CREATE INDEX file_media_idx on FileMedia (JobId, FileIndex);
+
+UPDATE Version SET VersionId=1018;
+commit;
+END-OF-DATA
+    then
+	echo "Update of Bacula PostgreSQL tables 1017 to 1018 succeeded."
+	getVersion
+    else
+	echo "Update of Bacula PostgreSQL tables 1017 to 1018 failed."
+	exit 1
+    fi
+fi
+
+if [ "$DBVERSION" -eq 1018 -a "$SKIP1018" = 1 ]; then
+    # From version 16, the upgrade 1018-1019 is already done
+    if psql -f - -d ${db_name} $* <<END-OF-DATA
+UPDATE Version SET VersionId=1019;
+END-OF-DATA
+    then
+	echo "Update of Bacula PostgreSQL tables 1018 to 1019 succeeded."
+	getVersion
+    else
+	echo "Update of Bacula PostgreSQL tables 1018 to 1019 failed."
+	exit 1
+    fi
+fi
+
+if [ "$DBVERSION" -eq 1018 ] ; then
+    if psql -f - -d ${db_name} $* <<END-OF-DATA
+begin;
+ALTER TABLE basefiles ALTER COLUMN baseid SET DATA TYPE bigint;
+ALTER TABLE media RENAME COLUMN volparts TO voltype;
+ALTER TABLE media ADD COLUMN volparts INTEGER DEFAULT 0;
+ALTER TABLE media ADD COLUMN volcloudparts INTEGER DEFAULT 0;
+ALTER TABLE media ADD COLUMN lastpartbytes BIGINT DEFAULT 0;
+ALTER TABLE media ADD COLUMN cacheretention BIGINT DEFAULT 0;
+ALTER TABLE pool ADD COLUMN cacheretention BIGINT DEFAULT 0;
+
+UPDATE Version SET VersionId=1019;
+commit;
+END-OF-DATA
+    then
+	echo "Update of Bacula PostgreSQL tables 1018 to 1019 succeeded."
+	getVersion
+    else
+	echo "Update of Bacula PostgreSQL tables 1018 to 1019 failed."
+	exit 1
+    fi
+fi
+
+if [ "$DBVERSION" -eq 1019 ] ; then
+    if psql -f - -d ${db_name} $* <<END-OF-DATA
+begin;
+ALTER TABLE pool ADD COLUMN maxpoolbytes BIGINT DEFAULT 0;
+ALTER TABLE Job ADD COLUMN PriorJob text DEFAULT '';
+ALTER TABLE JobHisto ADD COLUMN PriorJob text DEFAULT '';
+UPDATE Version SET VersionId=1020;
+commit;
+END-OF-DATA
+    then
+	echo "Update of Bacula PostgreSQL tables 1019 to 1020 succeeded."
+	getVersion
+    else
+	echo "Update of Bacula PostgreSQL tables 1019 to 1020 failed."
+	exit 1
+    fi
+fi
+
+
+if [ "$DBVERSION" -eq 1020 ] ; then
+    if psql -f - -d ${db_name} $* <<END-OF-DATA
+begin;
+UPDATE Version SET VersionId=1021;
+commit;
+END-OF-DATA
+    then
+	echo "Update of Bacula PostgreSQL tables 1020 to 1021 succeeded."
+	getVersion
+    else
+	echo "Update of Bacula PostgreSQL tables 1020 to 1021 failed."
+	exit 1
+    fi
+fi
+
+if [ "$DBVERSION" -eq 1021 ] ; then
+    if psql -f - -d ${db_name} $* <<END-OF-DATA
+begin;
+
+CREATE TABLE TagJob
+(
+   JobId integer not null,
+   Tag   text    not null,
+   primary key (JobId, Tag)
+);
+
+CREATE TABLE TagClient
+(
+   ClientId integer not null,
+   Tag      text    not null,
+   primary key (ClientId, Tag)
+);
+
+CREATE TABLE TagMedia
+(
+   MediaId integer not null,
+   Tag      text    not null,
+   primary key (MediaId, Tag)
+);
+
+CREATE TABLE TagObject
+(
+   ObjectId integer not null,
+   Tag      text    not null,
+   primary key (ObjectId, Tag)
+);
+
+CREATE TABLE Object
+(
+   ObjectId     bigserial   not null,
+
+   JobId        integer  not null,
+   Path         text     not null,
+   Filename     text     not null,
+   PluginName   text     not null,
+
+   ObjectType   text     not null,
+   ObjectName   text     not null,
+   ObjectSource text     not null,
+   ObjectUUID   text     not null,
+   ObjectSize   bigint   not null,
+   primary key (ObjectId)
+);
+
+create index object_jobid_idx on Object (JobId);
+create index object_type_idx on Object  (ObjectType);
+create index object_name_idx on Object  (ObjectName);
+create index object_source_idx on Object  (ObjectSource);
+
+CREATE TABLE Events
+(
+    EventsId           serial	  not null,
+    EventsCode        text        not null,
+    EventsType	      text	  not null,
+    EventsTime	      timestamp   without time zone,
+    EventsInsertTime   timestamp   without time zone DEFAULT NOW(),
+    EventsDaemon         text        default '',
+    EventsSource       text        default '',
+    EventsRef          text        default '',
+    EventsText	      text	  not null,
+    primary key (EventsId)
+);
+create index events_time_idx on Events (EventsTime);
+UPDATE Version SET VersionId=1022;
+commit;
+END-OF-DATA
+    then
+	echo "Update of Bacula PostgreSQL tables 1021 to 1022 succeeded."
+	getVersion
+    else
+	echo "Update of Bacula PostgreSQL tables 1021 to 1022 failed."
+	exit 1
+    fi
+fi
+
+#
+# For all versions, we need to create the Index on Media(PoolId/StorageId)
+# It may fail, but it's not a big problem
+#
+psql -f - -d ${db_name} $* <<END-OF-DATA >/dev/null 2>/dev/null
+set client_min_messages = fatal;
+CREATE INDEX media_poolid_idx on Media (PoolId);
+CREATE INDEX media_storageid_idx ON Media (StorageId);
+END-OF-DATA
+
+exit 0

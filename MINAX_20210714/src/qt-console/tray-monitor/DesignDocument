@@ -1,0 +1,101 @@
+*/
+/*
+ * Tray Monitor Design Document
+ *
+ * Written by Henrique Faria, February MMXIX
+ *
+ */
+
+This document aims to explain major design decisions related
+to the Tray Monitor.
+
+###### Goals
+
+One of the major requirements of this project is that the Tray Monitor
+must run on Desktop and Mobile (Android / iOS) platforms, along with
+the requirement of reusing as much code as possible across all platforms.
+
+With that mind, the design must isolate as much platform specific
+code as possible, thus making it dependant on platform independent code.
+One such example is the Tray-Monitor User Interface, which contains
+specific code for Desktop platforms and specific code for Mobile platforms,
+both sharing the same platform independent controllers and models (See Architecture Design).
+
+###### Interface Design
+
+#### User Interface
+
+The Tray Monitor UI is implemented with two different Qt libraries: Qt Widgets for Desktop,
+which is based on C++, and Qt QML for Mobile, which is based on QML / JS.
+
+1-) Desktop
+http://doc.qt.io/qt-5/qtwidgets-index.html
+
+
+2-) Mobile
+http://doc.qt.io/qt-5/qtquick-index.html
+http://doc.qt.io/qt-5/qmlapplications.html
+
+The UI code should depend on platform independent controllers and models. No other part
+of the Tray Monitor should have dependencies with the UI code.
+
+
+#### Bacula Interface
+
+The Tray Monitor may talk via sockets with Bacula's FD, SD or DIR
+to issue commands or gather information.
+(See "authenticate.cpp | authenticate.h" and "task.cpp | task.h")
+
+(TODO detail network interface or point to a proper document) 
+
+#### Filesystem Interface
+
+The Tray Monitor stores configuration data on files. 
+(See "config_storage.cpp | config_storage.h")
+
+
+###### Architecture Design
+
+#### UI
+
+The UI is composed of C++ classes (or QML files, if on Mobile platform), with the following
+responsibilites:
+
+1-) Setup the User Interface
+2-) Handle the creation of other screens, windows, dialogs, etc
+3-) Read, Write and Watch properties of Models, updating the UI if necessary
+4-) Delegate User Input and anything else to the Controller
+
+Those classes (or QML files) should have a direct reference to:
+
+1-) Zero or more Controllers (in the majority of the cases, one Controller per UI file should be enough) 
+2-) Zero or more Models (more than one Model per UI file should be common)
+
+#### Controllers
+
+The Controllers are C++ classes that extends the QObject class, with the following
+responsibilites:
+
+1-) Handle actions requested by the User Interface
+2-) Talk with external interfaces (See Bacula Interface, Filesystem Interface), if necessary
+3-) Update Model properties, if necessary
+
+Controllers should have a direct reference to:
+
+1-) Zero or more Models
+2-) Objects that access External Interfaces (See Bacula Interface, Filesystem Interface)
+
+#### Models 
+
+The Models are C++ classes that extends the QObject class, with the following
+responsibilites:
+
+1-) Hold properties and Data Structures
+
+The Models should have a direct reference to:
+
+1-) Properties and Data Structures 
+
+###### Data Design
+
+(TODO show data structures and write brief explanation about them)

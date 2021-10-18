@@ -1,0 +1,48 @@
+#!/bin/sh
+
+MAKE=make
+QMAKE=@ANDROID_QT_QMAKE@
+APK_MAKE=@ANDROID_QT_APK_MAKE@
+
+TRAYMON_DIR=@TOP_DIR@/bacula/src/qt-console/tray-monitor
+BUILD_DIR=${TRAYMON_DIR}/android-build
+BUILD_JSON_FILE=android-libbacula-tray-monitor.so-deployment-settings.json
+BUILD_TARGET=android-@ANDROID_API@
+
+rm -rf ${BUILD_DIR}
+mkdir ${BUILD_DIR}
+cp ${KEYSTORE_FILE} ${BUILD_DIR}/android_release.keystore
+
+if [ -z "${ENTERPRISE}" ]; then
+   ${QMAKE} ${TRAYMON_DIR}/tray-monitor.android.pro -spec android-g++ INCLUDEPATH+=${ANDROID_OPENSSL_DIR}/include 
+else
+   ${QMAKE} ${TRAYMON_DIR}/tray-monitor.android.pro -spec android-g++ INCLUDEPATH+=${ANDROID_OPENSSL_DIR}/include DEFINES+="ENTERPRISE"
+fi
+
+#libfix.sh
+sed -i -e 's/\.so/\.la/g' Makefile
+
+if [ -z "${SKIP_CLEAN}" ]; then
+   ${MAKE} clean 
+fi
+
+${MAKE} 
+${MAKE} install INSTALL_ROOT=${BUILD_DIR}
+
+#mvdyn.sh.in
+cp ${TRAYMON_DIR}/.libs/libbacula-tray-monitor.so ${TRAYMON_DIR}
+cp ${TRAYMON_DIR}/.libs/libbacula-tray-monitor.so ${BUILD_DIR}/@ANDROID_QT_BUILD_LIBS@
+cp @TOP_DIR@/bacula/src/lib/.libs/libbaccfg-@VERSION@.so ${BUILD_DIR}/@ANDROID_QT_BUILD_LIBS@
+cp @TOP_DIR@/bacula/src/lib/.libs/libbac-@VERSION@.so ${BUILD_DIR}/@ANDROID_QT_BUILD_LIBS@
+cp @TOP_DIR@/bacula/src/findlib/.libs/libbacfind-@VERSION@.so ${BUILD_DIR}/@ANDROID_QT_BUILD_LIBS@
+#cp ${DEPKGS_DIR}/src/openssl/libssl.so ${BUILD_DIR}/@ANDROID_QT_BUILD_LIBS@ 
+#cp ${DEPKGS_DIR}/src/openssl/libcrypto.so ${BUILD_DIR}/@ANDROID_QT_BUILD_LIBS@ 
+
+#build android apk
+${APK_MAKE} --output ${BUILD_DIR} \
+    --verbose \
+    --input ${BUILD_JSON_FILE} \
+    --android-platform ${BUILD_TARGET} \
+    --sign ${BUILD_DIR}/android_release.keystore  \
+    --storepass $KEYSTORE_PASSWORD \
+    --gradle

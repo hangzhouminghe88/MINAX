@@ -1,0 +1,36 @@
+#!/bin/sh
+# Copyright (C) 2000-2021 Kern Sibbald
+# License: BSD 2-Clause; see file LICENSE-FOSS
+#
+# Sign binaries if possible with sign_exe script
+
+DIR=$1
+
+if [ "$DIR" = "" ]; then
+    echo "Usage: $0 <directory> | <file> <file> <file>"
+    exit 1
+fi
+
+if ! which sign_exe > /dev/null 2> /dev/null
+then
+   exit 0
+fi
+
+RET=0
+
+if [ -d "$DIR" ]; then
+    for F in "$DIR"/*.exe "$DIR"/*.dll
+    do
+        sign_exe "$F"
+        RET=`expr $RET + $?`
+    done
+
+else
+    for F in $*
+    do
+        sign_exe "$F"
+        RET=`expr $RET + $?`
+    done
+fi
+
+exit $RET

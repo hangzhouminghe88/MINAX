@@ -1,0 +1,496 @@
+#!/bin/sh
+#
+# Copyright (C) 2000-2020 Kern Sibbald
+# License: BSD 2-Clause; see file LICENSE-FOSS
+#
+# Shell script to update MySQL tables from Bacula Enterprise version from 4.0.x to 12.4.x
+#
+echo " "
+echo "This script will update a Bacula MySQL database"
+echo " from any from version 12-15 or 1014-1021 to version 1022"
+echo " which is needed to convert from any Bacula Enterprise"
+echo " version 4.0.x or later to version 12.4.x"
+echo " or Bacula Community versions 5.0.x, 5.2.x, 7.4.x, 9.x.x to"
+echo " Community version 11.0"
+echo " "
+echo "Depending on the current version of your catalog, you may"
+echo " have to run this script multiple times"
+echo " "
+bindir=@MYSQL_BINDIR@
+PATH="$bindir:$PATH"
+db_name=@db_name@
+
+# Special trick to not do the upgrade from 1015 to 1016 with this script
+if [ "$1" = "--stop1015" ]; then
+    STOP1015=yes
+    shift			# remove this option from $*
+fi
+
+ARGS=$*
+
+getVersion()
+{
+    mysql $ARGS -D ${db_name} -e "select VersionId from Version LIMIT 1\G" >/tmp/$$
+    DBVERSION=`sed -n -e 's/^VersionId: \(.*\)$/\1/p' /tmp/$$`
+}
+
+getVersion
+
+if [ "x$DBVERSION" = x ]; then
+    echo " "
+    echo "Unable to detect database version, you can specify connection information"
+    echo "on the command line."
+    echo "Error. Cannot upgrade this database."
+    echo " "
+    exit 1
+fi
+
+if [ "$DBVERSION" -lt 1014 -o "$DBVERSION" -gt 1021 ] ; then
+  if [ "$DBVERSION" -lt 12 -o "$DBVERSION" -gt 16 ] ; then
+    echo " "
+    echo "The existing database is version $DBVERSION !!"
+    echo "This script can only update an existing version 12-16 or 1014-1021 database to version 1022."
+    echo "Error. Cannot upgrade this database."
+    echo " "
+    exit 1
+  fi
+fi
+
+# For all versions, we need to create the Index on Media(StorageId)
+# It may fail, but it's not a big problem
+# mysql $* -f <<END-OF-DATA >/dev/null 2> /dev/null
+# CREATE INDEX media_storageid_idx ON Media (StorageId);
+# END-OF-DATA
+
+if [ "$DBVERSION" -eq 12 ] ; then
+    if mysql $* -f <<END-OF-DATA
+USE ${db_name};
+
+CREATE TABLE RestoreObject (
+   RestoreObjectId INTEGER UNSIGNED NOT NULL AUTO_INCREMENT,
+   ObjectName BLOB NOT NULL,
+   RestoreObject LONGBLOB NOT NULL,
+   PluginName TINYBLOB NOT NULL,
+   ObjectLength INTEGER DEFAULT 0,
+   ObjectFullLength INTEGER DEFAULT 0,
+   ObjectIndex INTEGER DEFAULT 0,
+   ObjectType INTEGER DEFAULT 0,
+   FileIndex INTEGER UNSIGNED DEFAULT 0,
+   JobId INTEGER UNSIGNED NOT NULL,
+   ObjectCompression INTEGER DEFAULT 0,
+   PRIMARY KEY(RestoreObjectId),
+   INDEX (JobId)
+);
+
+CREATE INDEX jobhisto_jobid_idx ON JobHisto (JobId);
+UPDATE Version SET VersionId=13;
+
+END-OF-DATA
+    then
+	echo "Update of Bacula MySQL tables from 12 to 13 succeeded."
+	getVersion
+    else
+	echo "Update of Bacula MySQL tables from 12 to 13 failed."
+	exit 1
+    fi
+fi
+
+if [ "$DBVERSION" -eq 13 ] ; then
+    if mysql $* -f <<END-OF-DATA
+USE ${db_name};
+
+ALTER TABLE File ADD COLUMN DeltaSeq smallint default 0;
+UPDATE Version SET VersionId=14;
+
+END-OF-DATA
+    then
+	echo "Update of Bacula MySQL tables from 13 to 14 succeeded."
+	getVersion
+    else
+	echo "Update of Bacula MySQL tables from 13 to 14 failed."
+	exit 1
+    fi
+fi
+
+if [ "$DBVERSION" -eq 14 ] ; then
+    if mysql $* -f <<END-OF-DATA
+USE ${db_name};
+
+INSERT INTO Status (JobStatus,JobStatusLong,Severity) VALUES
+   ('I', 'Incomplete Job',25);
+UPDATE Version SET VersionId=1014;
+END-OF-DATA
+    then
+	echo "Update of Bacula MySQL tables from 14 to 1014 succeeded."
+	getVersion
+    else
+	echo "Update of Bacula MySQL tables from 14 to 1014 failed."
+	exit 1
+    fi
+fi
+
+if [ "$DBVERSION" -eq 1014 ] ; then
+    if mysql $* -f <<END-OF-DATA
+USE ${db_name};
+
+ALTER TABLE Media ADD COLUMN VolABytes BIGINT UNSIGNED DEFAULT 0;
+ALTER TABLE Media ADD COLUMN VolAPadding BIGINT UNSIGNED DEFAULT 0;
+ALTER TABLE Media ADD COLUMN VolHoleBytes BIGINT UNSIGNED DEFAULT 0;
+ALTER TABLE Media ADD COLUMN VolHoles INTEGER UNSIGNED DEFAULT 0;
+UPDATE Version SET VersionId=1015;
+END-OF-DATA
+    then
+	echo "Update of Bacula MySQL tables from 1014 to 1015 succeeded."
+	getVersion
+    else
+	echo "Update of Bacula MySQL tables from 1014 to 1015 failed."
+	exit 1
+    fi
+fi
+
+if [ "$DBVERSION" -eq 15 -o "$DBVERSION" -eq 16 ]; then
+    # In version 16, the upgrade 1017-1018 is already done
+    if [ "$DBVERSION" -eq 16 ]; then
+        SKIP1018=1
+    fi
+
+    if mysql --skip-reconnect $* <<END-OF-DATA
+USE ${db_name};
+
+-- Revert the FileIndex if needed
+ALTER TABLE RestoreObject
+   MODIFY FileIndex INTEGER UNSIGNED DEFAULT 0;
+ALTER TABLE BaseFiles
+   MODIFY FileIndex INTEGER UNSIGNED DEFAULT 0;
+
+DROP INDEX JobId on File;
+DROP INDEX JobId_2 on File;
+
+CREATE TABLE file_temp (
+   FileId BIGINT UNSIGNED NOT NULL,
+   FileIndex INTEGER DEFAULT 0,
+   JobId INTEGER UNSIGNED NOT NULL,
+   PathId INTEGER UNSIGNED NOT NULL,
+   Filename BLOB NOT NULL,
+   DeltaSeq SMALLINT UNSIGNED DEFAULT 0,
+   MarkId INTEGER UNSIGNED DEFAULT 0,
+   LStat TINYBLOB NOT NULL,
+   MD5 TINYBLOB
+   );
+
+INSERT INTO file_temp (FileId, FileIndex, JobId, PathId, Filename, DeltaSeq,
+		       MarkId, LStat, Md5)
+   SELECT FileId, FileIndex, JobId, PathId, Filename.Name, DeltaSeq, 
+	  MarkId, LStat, Md5
+    FROM File JOIN Filename USING (FilenameId);
+
+DROP TABLE Filename;
+DROP TABLE File;
+
+ALTER TABLE file_temp RENAME TO File;
+ALTER TABLE File ADD PRIMARY KEY (FileId);
+ALTER TABLE File MODIFY COLUMN FileId BIGINT UNSIGNED NOT NULL AUTO_INCREMENT;
+CREATE INDEX JobId on File (JobId);
+CREATE INDEX JobId_2 on File (JobId, PathId, Filename(255));
+
+ALTER TABLE Media CHANGE VolWrites VolWrites BIGINT UNSIGNED DEFAULT 0;
+ALTER TABLE UnsavedFiles DROP COLUMN FilenameId;
+ALTER TABLE UnsavedFiles ADD COLUMN Filename BLOB NOT NULL;
+
+UPDATE Version SET VersionId = 1017;
+
+END-OF-DATA
+    then
+	echo "Update of Bacula MySQL tables from $DBVERSION to 1017 succeeded."
+	getVersion
+    else
+	echo "Update of Bacula MySQL tables from $DBVERSION to 1017 failed."
+	exit 1
+    fi
+fi
+
+if [ "$STOP1015" = "" -a "$DBVERSION" -eq 1015 ]; then
+    if mysql --skip-reconnect $* <<END-OF-DATA
+USE ${db_name};
+
+DROP INDEX JobId on File;
+DROP INDEX JobId_2 on File;
+
+CREATE TABLE file_temp (
+   FileId BIGINT UNSIGNED NOT NULL,
+   FileIndex INTEGER DEFAULT 0,
+   JobId INTEGER UNSIGNED NOT NULL,
+   PathId INTEGER UNSIGNED NOT NULL,
+   Filename BLOB NOT NULL,
+   DeltaSeq SMALLINT UNSIGNED DEFAULT 0,
+   MarkId INTEGER UNSIGNED DEFAULT 0,
+   LStat TINYBLOB NOT NULL,
+   MD5 TINYBLOB
+   );
+
+INSERT INTO file_temp (FileId, FileIndex, JobId, PathId, Filename, DeltaSeq,
+		       MarkId, LStat, Md5)
+   SELECT FileId, FileIndex, JobId, PathId, Filename.Name, DeltaSeq, 
+	  MarkId, LStat, Md5
+    FROM File JOIN Filename USING (FilenameId);
+
+DROP TABLE Filename;
+DROP TABLE File;
+
+ALTER TABLE file_temp RENAME TO File;
+ALTER TABLE File ADD PRIMARY KEY (FileId);
+ALTER TABLE File MODIFY COLUMN FileId BIGINT UNSIGNED NOT NULL AUTO_INCREMENT;
+CREATE INDEX JobId on File (JobId);
+CREATE INDEX JobId_2 on File (JobId, PathId, Filename(255));
+
+ALTER TABLE Media CHANGE VolWrites VolWrites BIGINT UNSIGNED DEFAULT 0;
+ALTER TABLE Job ADD COLUMN FileTable CHAR(20) default 'File';
+ALTER TABLE JobHisto ADD COLUMN FileTable CHAR(20) default 'File';
+
+
+CREATE TABLE Snapshot (
+  SnapshotId	  INTEGER UNSIGNED AUTO_INCREMENT,
+  Name		  TINYBLOB NOT NULL,
+  CreateTDate	  BIGINT   NOT NULL,
+  CreateDate	  DATETIME NOT NULL,
+  ClientId	  INTEGER UNSIGNED DEFAULT 0,
+  Volume	  TINYBLOB NOT NULL,
+  Device	  TINYBLOB NOT NULL,
+  Type		  TINYBLOB NOT NULL,
+  Retention	  INTEGER DEFAULT 0,
+  Comment	  BLOB,
+  primary key (SnapshotId)
+);
+
+CREATE UNIQUE INDEX snapshot_idx ON Snapshot (Device(255), Volume(255), Name(255));
+
+UPDATE Version SET VersionId = 1016;
+
+END-OF-DATA
+    then
+	echo "Update of Bacula MySQL tables from 1015 to 1016 succeeded."
+	getVersion
+    else
+	echo "Update of Bacula MySQL tables from 1015 to 1016 failed."
+	exit 1
+    fi
+fi
+
+if [ "$DBVERSION" -eq 1016 ] ; then
+    if mysql $* -f <<END-OF-DATA
+USE ${db_name};
+CREATE INDEX jobtdate_idx on JobHisto (JobTDate);
+ALTER TABLE Snapshot ADD COLUMN JobId INTEGER UNSIGNED DEFAULT 0;
+ALTER TABLE Snapshot ADD COLUMN FileSetId INTEGER UNSIGNED DEFAULT 0;
+UPDATE Version SET VersionId=1017;
+END-OF-DATA
+    then
+	echo "Update of Bacula MySQL tables from 1016 to 1017 succeeded."
+	getVersion
+    else
+	echo "Update of Bacula MySQL tables from 1016 to 1017 failed."
+	exit 1
+    fi
+fi
+
+if [ "$DBVERSION" -eq 1017 ] ; then
+    if mysql $* -f <<END-OF-DATA
+USE ${db_name};
+CREATE TABLE FileMedia
+(
+    JobId	      integer	UNSIGNED  not null,
+    FileIndex	      integer	UNSIGNED  not null,
+    MediaId	      integer	UNSIGNED  not null,
+    BlockAddress      bigint	UNSIGNED  default 0,
+    RecordNo	      integer	UNSIGNED  default 0,
+    FileOffset	      bigint	UNSIGNED  default 0,
+    INDEX (JobId, FileIndex)
+);
+UPDATE Version SET VersionId=1018;
+END-OF-DATA
+    then
+	echo "Update of Bacula MySQL tables from 1017 to 1018 succeeded."
+	getVersion
+    else
+	echo "Update of Bacula MySQL tables from 1017 to 1018 failed."
+	exit 1
+    fi
+fi
+
+# We are coming from version 16, so it's already done
+if [ "$SKIP1018" = 1 -a "$DBVERSION" -eq 1018 ]; then
+    if mysql $* -f  <<END-OF-DATA
+USE ${db_name};
+ALTER TABLE File MODIFY FileIndex INTEGER DEFAULT 0;
+ALTER TABLE RestoreObject MODIFY FileIndex INTEGER DEFAULT 0;
+ALTER TABLE BaseFiles MODIFY FileIndex INTEGER DEFAULT 0;
+UPDATE Version SET VersionId=1019;
+END-OF-DATA
+    then
+	echo "Update of Bacula MySQL tables 1018 to 1019 succeeded. (From 16)"
+	getVersion
+    else
+	echo "Update of Bacula MySQL tables 1018 to 1019 failed. (From 16)"
+	exit 1
+    fi
+fi
+
+if [ "$DBVERSION" -eq 1018 ] ; then
+    if mysql $* -f  <<END-OF-DATA
+USE ${db_name};
+ALTER TABLE BaseFiles MODIFY COLUMN BaseId BIGINT UNSIGNED NOT NULL AUTO_INCREMENT;
+ALTER TABLE Media CHANGE COLUMN VolParts VolType INTEGER UNSIGNED DEFAULT 0;
+ALTER TABLE Media ADD COLUMN VolParts INTEGER DEFAULT 0;
+ALTER TABLE Media ADD COLUMN VolCloudParts INTEGER DEFAULT 0;
+ALTER TABLE Media ADD COLUMN LastPartBytes BIGINT DEFAULT 0;
+ALTER TABLE Media ADD COLUMN CacheRetention BIGINT DEFAULT 0;
+ALTER TABLE Pool ADD COLUMN CacheRetention BIGINT DEFAULT 0;
+
+-- If you switch to MySQL 5.7
+ALTER TABLE Device ALTER COLUMN CleaningDate DROP DEFAULT;
+ALTER TABLE Job    ALTER COLUMN SchedTime    DROP DEFAULT;
+ALTER TABLE Job    ALTER COLUMN StartTime    DROP DEFAULT;
+ALTER TABLE Job    ALTER COLUMN EndTime      DROP DEFAULT;
+ALTER TABLE Job    ALTER COLUMN RealEndTime  DROP DEFAULT;
+ALTER TABLE JobHisto ALTER COLUMN SchedTime  DROP DEFAULT;
+ALTER TABLE JobHisto ALTER COLUMN StartTime  DROP DEFAULT;
+ALTER TABLE JobHisto ALTER COLUMN EndTime    DROP DEFAULT;
+ALTER TABLE JobHisto ALTER COLUMN RealEndTime DROP DEFAULT;
+ALTER TABLE LocationLog ALTER COLUMN Date DROP DEFAULT;
+ALTER TABLE FileSet	ALTER COLUMN CreateTime DROP DEFAULT;
+ALTER TABLE Media	ALTER COLUMN FirstWritten DROP DEFAULT;
+ALTER TABLE Media	ALTER COLUMN LastWritten DROP DEFAULT;
+ALTER TABLE Media	ALTER COLUMN LabelDate DROP DEFAULT;
+ALTER TABLE Media	ALTER COLUMN InitialWrite DROP DEFAULT;
+ALTER TABLE Log 	ALTER COLUMN Time DROP DEFAULT;
+
+UPDATE Version SET VersionId=1019;
+END-OF-DATA
+    then
+	echo "Update of Bacula MySQL tables 1018 to 1019 succeeded."
+	getVersion
+    else
+	echo "Update of Bacula MySQL tables 1018 to 1019 failed."
+	exit 1
+    fi
+fi
+
+
+if [ "$DBVERSION" -eq 1019 ] ; then
+    if mysql $* -f  <<END-OF-DATA
+USE ${db_name};
+ALTER TABLE Pool ADD COLUMN MaxPoolBytes BIGINT UNSIGNED DEFAULT 0;
+ALTER TABLE Job ADD COLUMN PriorJob TINYBLOB;
+ALTER TABLE JobHisto ADD COLUMN PriorJob TINYBLOB;
+UPDATE Version SET VersionId=1020;
+END-OF-DATA
+    then
+	echo "Update of Bacula MySQL tables 1019 to 1020 succeeded."
+	getVersion
+    else
+	echo "Update of Bacula MySQL tables 1019 to 1020 failed."
+	exit 1
+    fi
+fi
+
+if [ "$DBVERSION" -eq 1020 ] ; then
+    if mysql $* -f  <<END-OF-DATA
+USE ${db_name};
+ALTER TABLE File
+   MODIFY FileIndex INTEGER DEFAULT 0;
+ALTER TABLE RestoreObject
+   MODIFY FileIndex INTEGER DEFAULT 0;
+ALTER TABLE BaseFiles
+   MODIFY FileIndex INTEGER DEFAULT 0;
+UPDATE Version SET VersionId=1021;
+END-OF-DATA
+    then
+        echo "Update of Bacula MySQL tables 1020 to 1021 succeeded."
+        getVersion
+    else
+        echo "Update of Bacula MySQL tables 1020 to 1021 failed."
+        exit 1
+    fi
+fi
+
+if [ "$DBVERSION" -eq 1021 ] ; then
+    if mysql $* -f  <<END-OF-DATA
+USE ${db_name};
+
+CREATE TABLE TagJob
+(
+   JobId INTEGER UNSIGNED not null,
+   Tag   TINYBLOB    not null,
+   primary key (JobId, Tag(255))
+);
+
+CREATE TABLE TagClient
+(
+   ClientId INTEGER UNSIGNED not null,
+   Tag      TINYBLOB    not null,
+   primary key (ClientId, Tag(255))
+);
+
+CREATE TABLE TagMedia
+(
+   MediaId INTEGER UNSIGNED not null,
+   Tag      TINYBLOB   not null,
+   primary key (MediaId, Tag(255))
+);
+
+CREATE TABLE TagObject
+(
+   ObjectId INTEGER UNSIGNED not null,
+   Tag      TINYBLOB    not null,
+   primary key (ObjectId, Tag(255))
+);
+
+CREATE TABLE Object
+(
+   ObjectId     BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+
+   JobId        INTEGER UNSIGNED  not null,
+   Path         BLOB NOT NULL,
+   Filename     BLOB NOT NULL,
+   PluginName   TINYBLOB NOT NULL,
+
+   ObjectType   TINYBLOB     NOT NULL,
+   ObjectName   TINYBLOB     NOT NULL,
+   ObjectSource TINYBLOB     NOT NULL,
+   ObjectUUID   TINYBLOB     NOT NULL,
+   ObjectSize   BIGINT       NOT NULL,
+   primary key (ObjectId)
+);
+
+create index object_jobid_idx on Object (JobId);
+create index object_type_idx on Object  (ObjectType(255));
+create index object_name_idx on Object  (ObjectName(255));
+create index object_source_idx on Object  (ObjectSource(255));
+
+CREATE TABLE Events
+(
+    EventsId          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    EventsCode        TINYBLOB NOT NULL,
+    EventsType        TINYBLOB NOT NULL,
+    EventsTime        DATETIME,
+    EventsInsertTime  DATETIME DEFAULT NOW(),
+    EventsDaemon        TINYBLOB NOT NULL,
+    EventsSource      TINYBLOB NOT NULL,
+    EventsRef         TINYBLOB NOT NULL,
+    EventsText        BLOB NOT NULL,
+    primary key (EventsId)
+);
+create index events_time_idx on Events (EventsTime);
+UPDATE Version SET VersionId=1022;
+END-OF-DATA
+    then
+        echo "Update of Bacula MySQL tables 1021 to 1022 succeeded."
+        getVersion
+    else
+        echo "Update of Bacula MySQL tables 1021 to 1022 failed."
+        exit 1
+    fi
+fi
+
+
+exit 0

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Material Design colors palette -->
+<resources>
+    <color name="colorPrimary">#d32f2f</color>
+    <color name="colorPrimaryDark">#b71c1c</color>
+    <color name="colorAccent">#f44336</color>
+
+    <color name="material_grey_palette_50">#FAFAFA</color>
+    <color name="material_grey_palette_100">#F5F5F5</color>
+    <color name="material_grey_palette_200">#EEEEEE</color>
+    <color name="material_grey_palette_300">#E0E0E0</color>
+    <color name="material_grey_palette_400">#BDBDBD</color>
+    <color name="material_grey_palette_500">#9E9E9E</color>
+    <color name="material_grey_palette_600">#757575</color>
+    <color name="material_grey_palette_700">#616161</color>
+    <color name="material_grey_palette_800">#424242</color>
+    <color name="material_grey_palette_900">#212121</color>
+
+    <color name="textPrimary">#de000000</color> <!-- Black 87% -->
+    <color name="textSecondary">#8a000000</color> <!-- Black 54% -->
+    <color name="textTertiary">#61000000</color> <!-- Black 38% -->
+
+    <color name="greyDivider">@color/material_grey_palette_300</color>
+
+    <color name="redError">#d32f2f</color>
+    <color name="greenDone">#388E3C</color>
+    <color name="orangeWarning">#e65100</color>
+    <color name="yellowWarning">#F9A825</color>
+
+    <color name="white">#FFFFFF</color>
+    <color name="black">#000000</color>
+
+</resources>

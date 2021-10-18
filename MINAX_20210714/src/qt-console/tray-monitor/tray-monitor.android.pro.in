@@ -1,0 +1,200 @@
+######################################################################
+#
+#  !!!!!!! IMPORTANT !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#
+#  Edit only tray-monitor.pro.in  -- tray-monitor.pro is built by the ./configure program
+#
+#  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#
+
+#####################################################################################
+#### Project Configuration
+
+TEMPLATE     = app
+TARGET       = bacula-tray-monitor
+
+CONFIG += qt
+
+QMAKE_CC = $(CXX) 
+QMAKE_CLEAN += obj/* .libs/* bacula-tray-monitor release/bacula-tray-monitor
+QMAKE_CXXFLAGS += -DTRAY_MONITOR
+QMAKE_CFLAGS += -DTRAY_MONITOR
+
+INSTALLS = targets
+
+MOC_DIR      = moc
+OBJECTS_DIR  = obj
+UI_DIR       = ui
+
+baculafd.path = /assets
+baculafd.files = ../../filed/static-bacula-fd ./android/bacula-fd.conf
+INSTALLS += baculafd
+
+#####################################################################################
+#### QT Libraries used by this project
+
+QT += widgets
+QT += qml
+QT += androidextras
+QT += network 
+
+#####################################################################################
+#### Bacula Libraries used by this project and the way they are linked
+
+LIBS        += -L../../lib -lbaccfg -lbac -L../../findlib -lbacfind -lbac @OPENSSL_LIBS@
+DEPENDPATH  += .
+INCLUDEPATH += ../.. .
+
+# We make Libtool create a dynamically linked shared object called "libbacula-tray-monitor.so"
+LIBTOOL_LINK = @QMAKE_LIBTOOL@ --silent --tag=CXX --mode=link
+QMAKE_LINK   = $${LIBTOOL_LINK} $(CXX) -export-dynamic -rpath $(DESTDIR)/obj -avoid-version
+
+######################################################################################
+#### Android Native files
+
+DISTFILES += \
+    android/AndroidManifest.xml \
+    android/gradle/wrapper/gradle-wrapper.jar \
+    android/gradlew \
+    android/res/values/libs.xml \
+    android/build.gradle \
+    android/gradle/wrapper/gradle-wrapper.properties \
+    android/gradlew.bat
+
+ANDROID_PACKAGE_SOURCE_DIR = $$PWD/android
+
+######################################################################################
+#### Android Project Sources
+
+### Images, QML files, etc
+RESOURCES    = ../main.qrc android.qrc
+
+### Translation files
+TRANSLATIONS += ts/tm_fr.ts ts/tm_de.ts ts/tm_ja.ts
+
+### Program Entry Point
+HEADERS += tray-monitor.h
+SOURCES += tray-monitor.cpp
+
+HEADERS += tray-ui-controller.h \
+    runjob-ui-controller.h \
+    resmodel.h \
+    jobmodel.h \
+    runjobmodel.h \
+    restorejobmodel.h \
+    restore-ui-controller.h \
+    respanel-ui-controller.h
+
+SOURCES += tray-ui-controller.cpp \
+    runjob-ui-controller.cpp \
+    resmodel.cpp \
+    jobmodel.cpp \
+    runjobmodel.cpp \
+    restorejobmodel.cpp \
+    restore-ui-controller.cpp \
+    respanel-ui-controller.cpp
+
+# App Boot Controller
+HEADERS += app-boot-ui-controller.h
+SOURCES += app-boot-ui-controller.cpp
+
+# Enterprise Start Screen
+HEADERS += enterprise-tray-ui-controller.h
+SOURCES += enterprise-tray-ui-controller.cpp
+
+SOURCES += authenticate.cpp
+HEADERS += filesmodel.h
+
+SOURCES += ../../lib/authenticatebase.cc
+HEADERS += ../../lib/authenticatebase.h
+
+# Data Structures
+HEADERS += tray_conf.h
+SOURCES += tray_conf.cpp
+
+# Configuration Storage
+HEADERS += config-storage.h
+SOURCES += config-storage.cpp
+
+# Resource Details Screen
+HEADERS += resdetails-ui-controller.h
+SOURCES += resdetails-ui-controller.cpp
+
+# FD Config Screen
+HEADERS += fd-config-ui-controller.h
+SOURCES += fd-config-ui-controller.cpp
+
+#Task
+HEADERS += task.h
+SOURCES += task.cpp
+
+# CDP Client
+CDP_DIR = ../../tools/cdp-client
+HEADERS += $$CDP_DIR/backupservice.h $$CDP_DIR/folderwatcher.h desktop-gui/cdp-main-ui.h $$CDP_DIR/cdp.h
+SOURCES += $$CDP_DIR/backupservice.cpp $$CDP_DIR/folderwatcher.cpp
+INCLUDEPATH += $$CDP_DIR
+
+# Journal
+JOURNAL_DIR = ../../plugins/fd
+HEADERS += $$JOURNAL_DIR/journal.h $$JOURNAL_DIR/file-record.h $$JOURNAL_DIR/folder-record.h $$JOURNAL_DIR/settings-record.h
+SOURCES += $$JOURNAL_DIR/journal.c
+INCLUDEPATH += $$JOURNAL_DIR
+
+# Registration Wizard 
+REGWIZ_DIR = ../RegistrationWizard
+HEADERS += $$REGWIZ_DIR/bweb-service.h
+SOURCES += $$REGWIZ_DIR/bweb-service.cpp
+INCLUDEPATH += $$REGWIZ_DIR
+
+# Android File Daemon Service
+HEADERS += android-fd-service.h
+
+######################################################################################
+#### Desktop Project Sources to be removed in the future
+
+HEADERS += tray-ui.h
+
+# Util
+HEADERS += ../util/fmtwidgetitem.h
+SOURCES += ../util/fmtwidgetitem.cpp
+
+# DIR Status
+HEADERS += dirstatus.h
+SOURCES += dirstatus.cpp
+
+# SD Status
+HEADERS += sdstatus.h
+SOURCES += sdstatus.cpp
+
+# Conf
+HEADERS += conf.h
+SOURCES += conf.cpp
+
+# Run Job
+HEADERS += runjob.h
+SOURCES += runjob.cpp
+
+# Status
+HEADERS += status.h
+SOURCES += status.cpp
+
+#FD Status
+HEADERS += fdstatus.h
+SOURCES += fdstatus.cpp
+
+# Wizards
+HEADERS += restorewizard.h
+HEADERS += clientselectwizardpage.h
+HEADERS += jobselectwizardpage.h
+HEADERS += fileselectwizardpage.h
+HEADERS += restoreoptionswizardpage.h
+HEADERS += pluginwizardpage.h
+
+SOURCES += restorewizard.cpp
+SOURCES += clientselectwizardpage.cpp
+SOURCES += jobselectwizardpage.cpp
+SOURCES += fileselectwizardpage.cpp
+SOURCES += restoreoptionswizardpage.cpp
+SOURCES += pluginwizardpage.cpp
+
+FORMS += fd-monitor.ui dir-monitor.ui sd-monitor.ui main-conf.ui res-conf.ui run.ui restorewizard.ui clientselectwizardpage.ui jobselectwizardpage.ui fileselectwizardpage.ui restoreoptionswizardpage.ui pluginwizardpage.ui

@@ -1,0 +1,100 @@
+#!/bin/sh
+#
+# Copyright (C) 2000-2020 Kern Sibbald
+# License: BSD 2-Clause; see file LICENSE-FOSS
+#
+#
+echo " "
+echo "This script will update a Bacula PostgreSQL database from version 1020 to 1021"
+echo " "
+
+bindir=@POSTGRESQL_BINDIR@
+PATH="$bindir:$PATH"
+db_name=${db_name:-@db_name@}
+
+DBVERSION=`psql -d ${db_name} -t --pset format=unaligned -c "select VersionId from Version" $*`
+if [ $DBVERSION != 1021 ] ; then
+   echo " "
+   echo "The existing database is version $DBVERSION !!"
+   echo "This script can only update an existing version 1021 database to version 1022."
+   echo "Error. Cannot upgrade this database."
+   echo " "
+   exit 1
+fi
+
+if psql -f - -d ${db_name} $* <<END-OF-DATA
+begin;
+CREATE TABLE TagJob
+(
+   JobId integer not null,
+   Tag   text    not null,
+   primary key (JobId, Tag)
+);
+
+CREATE TABLE TagClient
+(
+   ClientId integer not null,
+   Tag      text    not null,
+   primary key (ClientId, Tag)
+);
+
+CREATE TABLE TagMedia
+(
+   MediaId integer not null,
+   Tag      text    not null,
+   primary key (MediaId, Tag)
+);
+
+CREATE TABLE TagObject
+(
+   ObjectId integer not null,
+   Tag      text    not null,
+   primary key (ObjectId, Tag)
+);
+
+CREATE TABLE Object
+(
+   ObjectId     bigserial  not null,
+
+   JobId        integer  not null,
+   Path         text     not null,
+   Filename     text     not null,
+   PluginName   text     not null,
+
+   ObjectType   text     not null,
+   ObjectName   text     not null,
+   ObjectSource text     not null,
+   ObjectUUID   text     not null,
+   ObjectSize   bigint   not null,
+   primary key (ObjectId)
+);
+
+create index object_jobid_idx on Object (JobId);
+create index object_type_idx on Object  (ObjectType);
+create index object_name_idx on Object  (ObjectName);
+create index object_source_idx on Object  (ObjectSource);
+
+CREATE TABLE Events
+(
+    EventsId           serial     not null,
+    EventsCode        text        not null,
+    EventsType        text        not null,
+    EventsTime        timestamp   without time zone,
+    EventsInsertTime   timestamp   without time zone DEFAULT NOW(),
+    EventsDaemon         text        default '',
+    EventsSource       text        default '',
+    EventsRef          text        default '',
+    EventsText        text        not null,
+    primary key (EventsId)
+);
+create index events_time_idx on Events (EventsTime);
+UPDATE Version SET VersionId=1022;
+commit;
+END-OF-DATA
+then
+   echo "Update of Bacula PostgreSQL tables succeeded."
+else
+   echo "Update of Bacula PostgreSQL tables failed."
+fi
+
+exit 0

@@ -1,0 +1,109 @@
+#
+# Copyright (C) 2000-2020 Kern Sibbald
+# License: BSD 2-Clause; see file LICENSE-FOSS
+#
+# Bacula Tools Makefile
+#
+@MCOMMON@
+
+srcdir =	.
+VPATH = 	.
+.PATH:		.
+
+# one up
+basedir = ../..
+# top dir
+topdir = ../../..
+# this dir relative to top dir
+thisdir = src/tools/cdp-client
+
+DEBUG=@DEBUG@
+
+DB_LIBS=@DB_LIBS@
+
+first_rule: all
+dummy:
+
+#
+
+GETTEXT_LIBS = @LIBINTL@
+
+FINDOBJS = backupservice.cpp  cdp-client.cpp  folderwatcher.cpp backupservice.h cdp.h folderwatcher.h ../../plugins/fd/journal.c ../../plugins/fd/journal.h ../../plugins/fd/file-record.h ../../plugins/fd/settings-record.h ../../plugins/fd/folder-record.h
+
+.SUFFIXES:	.c .lo
+.PHONY:
+.DONTCARE:
+
+# inference rules
+.c.lo:
+	@echo "Compiling $<"
+	$(NO_ECHO) $(LIBTOOL_COMPILE) $(CXX) $(DEFS) $(DEBUG) -c $(CPPFLAGS) -I$(srcdir) -I$(basedir) -I$(basedir)/lib -I$(basedir)/plugins/fd $(DINCLUDE) $(CFLAGS) $<
+.cpp.lo:
+	@echo "Compiling $<"
+	$(NO_ECHO) $(LIBTOOL_COMPILE) $(CXX) $(DEFS) $(DEBUG) -c $(CPPFLAGS) -I$(srcdir) -I$(basedir) -I$(basedir)/lib -I$(basedir)/plugins/fd $(DINCLUDE) $(CFLAGS) $<
+
+#-------------------------------------------------------------------------
+all: Makefile cdp-client
+	@echo "==== Make of cdp-client is good ===="
+	@echo " "
+
+cdp-client: Makefile cdp-client.lo $(FINDOBJS) ../../plugins/fd/journal.lo   backupservice.lo  folderwatcher.lo ../../lib/libbac$(DEFAULT_ARCHIVE_TYPE)
+	$(LIBTOOL_LINK) $(CXX) $(LDFLAGS) -L../../lib -L../../findlib -o $@ cdp-client.lo ../../plugins/fd/journal.lo  backupservice.lo  folderwatcher.lo -lbac -lbacfind -lm $(DLIB) $(LIBS) $(GETTEXT_LIBS) $(OPENSSL_LIBS)
+
+Makefile: $(srcdir)/Makefile.in $(topdir)/config.status
+	cd $(topdir) \
+	  && CONFIG_FILES=$(thisdir)/$@ CONFIG_HEADERS= $(SHELL) ./config.status
+
+../../plugins/fd/journal.lo: ../../plugins/fd/journal.c
+	make -C ../../plugins/fd journal.lo
+
+libtool-clean:
+	@$(RMF) -r .libs _libs
+
+clean:	libtool-clean
+	@$(RMF) core core.* a.out *.o *.bak *~ *.intpro *.extpro 1 2 3 fs-io-error
+	@$(RMF) $(DIRTOOLS)
+
+realclean: clean
+	@$(RMF) tags
+
+distclean: realclean
+	if test $(srcdir) = .; then $(MAKE) realclean; fi
+	(cd $(srcdir); $(RMF) Makefile)
+
+devclean: realclean
+	if test $(srcdir) = .; then $(MAKE) realclean; fi
+	(cd $(srcdir); $(RMF) Makefile)
+
+# Allow non-root execution of bsmtp for non-root Directors
+install: cdp-client
+	@for tool in cdp-client ; do \
+	   $(LIBTOOL_INSTALL) $(INSTALL_PROGRAM) $$tool $(DESTDIR)$(sbindir)/$$tool ; \
+	done
+
+uninstall:
+	@for tool in cdp-client ; do \
+	   $(RMF) $(DESTDIR)$(sbindir)/$$tool ; \
+	done
+
+
+
+# Semi-automatic generation of dependencies:
+# Use gcc -MM because X11 `makedepend' doesn't work on all systems
+# and it also includes system headers.
+# `semi'-automatic since dependencies are generated at distribution time.
+
+depend:
+	@$(MV) Makefile Makefile.bak
+	@$(SED) "/^# DO NOT DELETE:/,$$ d" Makefile.bak > Makefile
+	@$(ECHO) "# DO NOT DELETE: nice dependency list follows" >> Makefile
+	@$(CXX) -S -M $(CPPFLAGS) $(TOKYOCABINET_INC) -I$(srcdir) -I$(basedir) -I../stored *.c >> Makefile
+	@if test -f Makefile ; then \
+	    $(RMF) Makefile.bak; \
+	else \
+	   $(MV) Makefile.bak Makefile; \
+	   echo " ===== Something went wrong in make depend ====="; \
+	fi
+
+# -----------------------------------------------------------------------
+# DO NOT DELETE: nice dependency list follows

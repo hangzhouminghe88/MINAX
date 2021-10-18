@@ -1,0 +1,53 @@
+#!/bin/sh
+# Copyright (C) 2000-2021 Kern Sibbald
+# License: BSD 2-Clause; see file LICENSE-FOSS
+#
+# Check if binaries are signed
+
+DIR=$1
+
+if [ "$DIR" = "" ]; then
+    echo "Usage: $0 <directory> | <file> <file> <file>"
+    exit 1
+fi
+
+if ! which osslsigncode > /dev/null 2> /dev/null
+then
+   echo "INFO: Not checking signature"
+   exit 0
+fi
+
+# Custom program to sign an executable
+if ! which sign_exe > /dev/null 2> /dev/null
+then
+   echo "INFO: Not checking signature"
+   exit 0
+fi
+
+RET=0
+
+if [ -d "$DIR" ]; then
+    for F in "$DIR"/*.exe "$DIR"/*.dll
+    do
+        osslsigncode verify "$F" | grep "Signature verification: ok"
+        if [ $? != 0 ]; then
+            echo "Signature verification: failed for $F"
+            RET=1
+        fi
+    done
+
+else
+    for F in $*
+    do
+        osslsigncode verify "$F" | grep "Signature verification: ok"
+        if [ $? != 0 ]; then
+            echo "Signature verification: failed for $F"
+            RET=1
+        fi
+    done
+fi
+
+if [ $RET != 0 ]; then
+    echo "ERROR: Some files are not signed correctly"
+fi
+exit $RET

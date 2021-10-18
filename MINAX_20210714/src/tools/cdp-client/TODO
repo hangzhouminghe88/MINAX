@@ -1,0 +1,8 @@
+Permission issues:
+
+1-) Handle permission issues with file copy to Spool Dir
+2-) Handle permission issues with file watch
+
+Watched Folders:
+
+1-) Write list of watched folders into the Journal

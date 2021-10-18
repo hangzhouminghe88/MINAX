@@ -1,0 +1,53 @@
+#!/bin/sh
+#
+# Copyright (C) 2000-2020 Kern Sibbald
+# License: BSD 2-Clause; see file LICENSE-FOSS
+#
+# shell script to delete Bacula tables for PostgreSQL
+
+bindir=@POSTGRESQL_BINDIR@
+db_name=@db_name@
+
+$bindir/psql -f - -d ${db_name} $* <<END-OF-DATA 1>/dev/null 2>/dev/null
+drop table if exists TagJob;
+drop table if exists TagClient;
+drop table if exists TagMedia;
+drop table if exists TagObject;
+drop table if exists Object;
+drop table if exists Events;
+drop table if exists unsavedfiles;
+drop table if exists basefiles;
+drop table if exists jobmedia;
+drop table if exists filemedia;
+drop table if exists file;
+drop table if exists job;
+drop table if exists jobhisto;
+drop table if exists media;
+drop table if exists client;
+drop table if exists pool;
+drop table if exists fileset;
+drop table if exists path;
+drop table if exists counters;
+drop table if exists version;
+drop table if exists CDImages;
+drop table if exists Device;
+drop table if exists Storage;
+drop table if exists MediaType;
+drop table if exists Status;
+drop table if exists mac;
+drop table if exists log;
+drop table if exists Location;
+drop table if exists locationlog;
+drop table if exists PathVisibility;
+drop table if exists PathHierarchy;
+drop table if exists RestoreObject;
+drop table if exists Snapshot;
+END-OF-DATA
+pstat=$?
+if test $pstat = 0; 
+then
+   echo "Deletion of Bacula PostgreSQL tables succeeded."
+else
+   echo "Deletion of Bacula PostgreSQL tables failed."
+fi
+exit $pstat

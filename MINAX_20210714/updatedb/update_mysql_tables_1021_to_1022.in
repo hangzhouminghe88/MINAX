@@ -1,0 +1,119 @@
+#!/bin/sh
+#
+# Copyright (C) 2000-2020 Kern Sibbald
+# License: BSD 2-Clause; see file LICENSE-FOSS
+#
+# Shell script to update MySQL
+#
+echo " "
+echo "This script will update a Bacula MySQL database from version 1021 to 1022"
+echo " "
+bindir=@MYSQL_BINDIR@
+PATH="$bindir:$PATH"
+db_name=${db_name:-@db_name@}
+
+mysql $* -D ${db_name} -e "select VersionId from Version\G" >/tmp/$$
+DBVERSION=`sed -n -e 's/^VersionId: \(.*\)$/\1/p' /tmp/$$`
+if [ $DBVERSION != 1020 ] ; then
+   echo " "
+   echo "The existing database is version $DBVERSION !!"
+   echo "This script can only update an existing version 1019 database to version 1021."
+   echo "Error. Cannot upgrade this database."
+   echo " "
+   exit 1
+fi
+
+if mysql $* -f <<END-OF-DATA
+USE ${db_name};
+CREATE TABLE TagJob
+(
+   JobId integer not null,
+   Tag   TINYBLOB    not null,
+   primary key (JobId, Tag(255))
+);
+
+CREATE TABLE TagClient
+(
+   ClientId integer not null,
+   Tag      TINYBLOB    not null,
+   primary key (ClientId, Tag(255))
+);
+
+CREATE TABLE TagMedia
+(
+   MediaId integer not null,
+   Tag      TINYBLOB   not null,
+   primary key (MediaId, Tag(255))
+);
+
+CREATE TABLE TagObject
+(
+   ObjectId integer not null,
+   Tag      TINYBLOB    not null,
+   primary key (ObjectId, Tag(255))
+);
+
+CREATE TABLE Object
+(
+   ObjectId     BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+
+   JobId        integer  not null,
+   Path         BLOB NOT NULL,
+   Filename     BLOB NOT NULL,
+   PluginName   TINYBLOB NOT NULL,
+
+   ObjectType   TINYBLOB     NOT NULL,
+   ObjectName   TINYBLOB     NOT NULL,
+   ObjectSource TINYBLOB     NOT NULL,
+   ObjectUUID   TINYBLOB     NOT NULL,
+   ObjectSize   BIGINT       NOT NULL,
+   primary key (ObjectId)
+);
+
+create index object_jobid_idx on Object (JobId);
+create index object_type_idx on Object  (ObjectType(255));
+create index object_name_idx on Object  (ObjectName(255));
+create index object_source_idx on Object  (ObjectSource(255));
+
+CREATE TABLE Events
+(
+    EventsId          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    EventsCode        TINYBLOB NOT NULL,
+    EventsType        TINYBLOB NOT NULL,
+    EventsTime        DATETIME,
+    EventsInsertTime  DATETIME,
+    EventsDaemon        TINYBLOB NOT NULL,
+    EventsSource      TINYBLOB NOT NULL,
+    EventsRef         TINYBLOB NOT NULL,
+    EventsText        BLOB NOT NULL,
+    primary key (EventsId)
+);
+create index events_time_idx on Events (EventsTime);
+
+UPDATE Version SET VersionId=1022;
+
+-- If you switch to MySQL 5.7
+ALTER TABLE Device ALTER COLUMN CleaningDate DROP DEFAULT;
+ALTER TABLE Job    ALTER COLUMN SchedTime    DROP DEFAULT;
+ALTER TABLE Job    ALTER COLUMN StartTime    DROP DEFAULT;
+ALTER TABLE Job    ALTER COLUMN EndTime      DROP DEFAULT;
+ALTER TABLE Job    ALTER COLUMN RealEndTime  DROP DEFAULT;
+ALTER TABLE JobHisto ALTER COLUMN SchedTime  DROP DEFAULT;
+ALTER TABLE JobHisto ALTER COLUMN StartTime  DROP DEFAULT;
+ALTER TABLE JobHisto ALTER COLUMN EndTime    DROP DEFAULT;
+ALTER TABLE JobHisto ALTER COLUMN RealEndTime DROP DEFAULT;
+ALTER TABLE LocationLog ALTER COLUMN Date DROP DEFAULT;
+ALTER TABLE FileSet	ALTER COLUMN CreateTime DROP DEFAULT;
+ALTER TABLE Media	ALTER COLUMN FirstWritten DROP DEFAULT;
+ALTER TABLE Media	ALTER COLUMN LastWritten DROP DEFAULT;
+ALTER TABLE Media	ALTER COLUMN LabelDate DROP DEFAULT;
+ALTER TABLE Media	ALTER COLUMN InitialWrite DROP DEFAULT;
+ALTER TABLE Log 	ALTER COLUMN Time DROP DEFAULT;
+
+END-OF-DATA
+then
+   echo "Update of Bacula MySQL tables succeeded."
+else
+   echo "Update of Bacula MySQL tables failed."
+fi
+exit 0
